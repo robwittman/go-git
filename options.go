@@ -3,6 +3,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -475,6 +476,8 @@ type CommitOptions struct {
 	// commit will not be signed. The private key must be present and already
 	// decrypted.
 	SignKey *openpgp.Entity
+	// Keyring path specifies the file location of a GPG Keyring
+	KeyringPath string
 }
 
 // Validate validates the fields and sets the default values.
@@ -485,9 +488,17 @@ func (o *CommitOptions) Validate(r *Repository) error {
 		}
 	}
 
+	if o.SignKey == nil {
+		if err := o.loadSigningKey(r); err != nil {
+			return err
+		}
+	}
+
 	if o.Committer == nil {
 		o.Committer = o.Author
 	}
+
+	// We should also populate the gpgSigningKey?
 
 	if len(o.Parents) == 0 {
 		head, err := r.Head()
@@ -538,6 +549,61 @@ func (o *CommitOptions) loadConfigAuthorAndCommitter(r *Repository) error {
 	}
 
 	return nil
+}
+
+func (o *CommitOptions) loadSigningKey(r *Repository) error {
+	cfg, err := r.ConfigScoped(config.SystemScope)
+	if err != nil {
+		return err
+	}
+
+	// We haven't provided a signKey directly, and one exists in the config
+	if o.SignKey == nil && cfg.Commit.GPGSign && cfg.User.SigningKey != "" {
+		// Load the PGP key, and set the signKey
+		key, err := o.fetchSigningKey(cfg.User.SigningKey)
+		if err != nil {
+			return err
+		}
+
+		o.SignKey = key
+	}
+
+	return nil
+}
+
+func (o *CommitOptions) fetchSigningKey(keyId string) (*openpgp.Entity, error) {
+	// TODO: This should be pulled from command flags
+	keyring, err := os.Open(o.KeyringPath)
+	if err != nil {
+		return nil, err
+	}
+
+	entityList, err := openpgp.ReadKeyRing(keyring)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(entityList) == 0 {
+		return nil, fmt.Errorf("GPG Keyring is empty")
+	}
+
+	if strings.HasPrefix(keyId, "0x") {
+		keyId = strings.TrimPrefix(keyId, "0x")
+	}
+
+	if len(keyId) != 16 {
+		return nil, fmt.Errorf("invalid GPG key id length; expected %d, got %d", 16, len(keyId))
+	}
+
+	keyId = strings.ToUpper(keyId)
+
+	for _, ent := range entityList {
+		if ent.PrimaryKey.KeyIdString() == keyId {
+			return ent, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to load GPG key from keyring")
 }
 
 var (

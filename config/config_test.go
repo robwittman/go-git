@@ -23,12 +23,15 @@ func (s *ConfigSuite) TestUnmarshal(c *C) {
 [user]
 		name = John Doe
 		email = john@example.com
+        signingKey = "12345"
 [author]
 		name = Jane Roe
 		email = jane@example.com
 [committer]
 		name = Richard Roe
 		email = richard@example.com
+[commit]
+        gpgsign = true
 [pack]
 		window = 20
 [remote "origin"]
